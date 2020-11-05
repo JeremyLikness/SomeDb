@@ -1,16 +1,10 @@
 ﻿using System;
-using System.Collections.Generic;
-using ExpressionDb;
-using System.Linq.Expressions;
+using SomeDb;
 using Microsoft.EntityFrameworkCore;
 using System.Linq;
-using Microsoft.EntityFrameworkCore.Diagnostics;
-using System.Data.Common;
-using System.Threading.Tasks;
-using System.Threading;
 
 // SQLite connection string
-var ConnectionStr = $"Data Source={nameof(MyExpressionContext)}.db";
+var ConnectionStr = $"Data Source={nameof(ADbContext)}.db";
 
 Console.WriteLine($"{new Unicorn()}{Environment.NewLine}Preparing database...");
 
@@ -28,13 +22,10 @@ ShowTypes();
 /// </summary>
 void ShowCounts()
 {
-    var options = new DbContextOptionsBuilder<MyExpressionContext>()
+    var options = new DbContextOptionsBuilder<ADbContext>()
         .UseSqlite(ConnectionStr);
-    using var context = new MyExpressionContext(options.Options);
-    Console.WriteLine($"{nameof(context.Types)} = {context.Types.Count()}");
-    Console.WriteLine($"{nameof(context.Methods)} = {context.Methods.Count()}");
-    Console.WriteLine($"{nameof(context.Properties)} = {context.Properties.Count()}");
-    Console.WriteLine($"{nameof(context.Parameters)} = {context.Parameters.Count()}");
+    using var context = new ADbContext(options.Options);
+    Console.WriteLine($"{nameof(context.SomeThings)} = {context.SomeThings.Count()}");    
 }
 
 /// <summary>
@@ -42,63 +33,29 @@ void ShowCounts()
 /// </summary>
 void ShowTypes()
 {
-    var options = new DbContextOptionsBuilder<MyExpressionContext>()
+    var options = new DbContextOptionsBuilder<ADbContext>()
         .UseSqlite(ConnectionStr);
-    //    .LogTo(Console.WriteLine, Microsoft.Extensions.Logging.LogLevel.Information);
+        //.LogTo(Console.WriteLine, Microsoft.Extensions.Logging.LogLevel.Information);
     
-    using var context = new MyExpressionContext(options.Options);
+    using var context = new ADbContext(options.Options);
 
-    var baseQuery = context.Types;
+    var baseQuery = context.SomeThings;
     
-    var query = baseQuery.Take(3).Select(
+    var query = baseQuery
+        .Where(thing => thing.IsActive &&
+            thing.Created > DateTime.Now.AddDays(-7))
+        .Take(5).Select(
         t => new
         {
             t.Name,
-            Props = t.TypeProperties.OrderBy(p => p.Name).Select(p => new
-            {
-                p.Name,
-                Type = p.PropertyType.Name
-            }),
-            Methods = t.TypeMethods.OrderBy(m => m.Name).Select(m => new
-            {
-                m.Name,
-                ReturnType = m.ReturnType.Name,
-                Parameters = m.MethodParameters.Select(mp => new
-                {
-                    mp.Name,
-                    Type = mp.ParameterType.Name
-                })
-            })
+            t.Created
         });
 
     //Console.WriteLine(query.ToQueryString());
-    
+        
     foreach (var result in query)
     {
-        Console.WriteLine(result.Name);
-        foreach (var prop in result.Props)
-        {
-            Console.WriteLine($"\t{prop.Type}: {prop.Name}");
-        }
-        Console.WriteLine("\t---");
-        foreach (var method in result.Methods)
-        {
-            Console.Write($"\t{method.ReturnType} : {method.Name} (");
-            bool first = true;
-            foreach (var parm in method.Parameters)
-            {
-                if (first)
-                {
-                    first = false;
-                }
-                else
-                {
-                    Console.Write(", ");
-                }
-                Console.Write($"{parm.Type}: {parm.Name}");
-            }
-            Console.WriteLine(")");
-        }
+        Console.WriteLine($"{result.Name} was created on {result.Created}");
         Console.WriteLine("---");
     }
 }
@@ -108,10 +65,10 @@ void ShowTypes()
 /// </summary>
 void SetupDatabase()
 {
-    var options = new DbContextOptionsBuilder<MyExpressionContext>()
+    var options = new DbContextOptionsBuilder<ADbContext>()
         .UseSqlite(ConnectionStr);
 
-    using var context = new MyExpressionContext(options.Options);
+    using var context = new ADbContext(options.Options);
 
     // already there
     if (!context.Database.EnsureCreated())
@@ -119,226 +76,46 @@ void SetupDatabase()
         return;
     }
 
-    var types = typeof(NewExpression).Assembly.GetTypes()
-        .Where(t => typeof(Expression).IsAssignableFrom(t));
+    var random = new Random();
 
-    var myTypes = new List<MyType>();
-
-    // keeps track of types already added
-    MyType GetOrSetType(string name)
+    for (var idx = 0; idx < 10000; idx++)
     {
-        if (string.IsNullOrWhiteSpace(name))
+        var something = new Something
         {
-            return null;
-        }
-
-        var typeMatch = myTypes.FirstOrDefault(mt => mt.Name == name);
-        if (typeMatch != null)
-        {
-            return typeMatch;
-        }
-
-        var newType = new MyType { Name = name }; ;
-        myTypes.Add(newType);
-        return newType;
-    }
-
-    foreach (var expr in types)
-    {
-
-        var myType = GetOrSetType(expr.Name);
-
-        foreach (var prop in expr.GetProperties().Where(p => !string.IsNullOrWhiteSpace(p.PropertyType.Name)))
-        {
-            var myProp = new MyProperty
-            {
-                Name = prop.Name,
-                ParentType = myType
-            };
-            var typeName = prop.PropertyType.Name;
-            myProp.PropertyType = GetOrSetType(typeName);
-            myType.TypeProperties.Add(myProp);
-            context.Properties.Add(myProp);
-        }
-
-        foreach (var method in expr.GetMethods())
-        {
-            var myMethod = new MyMethod
-            {
-                Name = method.Name,
-                ReturnType = GetOrSetType(method.ReturnType.Name),
-                ParentType = myType
-            };
-
-            foreach (var parameter in method.GetParameters())
-            {
-                var myParameter = new MyParameter
-                {
-                    Name = parameter.Name,
-                    ParameterType = GetOrSetType(parameter.ParameterType.Name),
-                    ParentMethod = myMethod
-                };
-                myMethod.MethodParameters.Add(myParameter);
-                context.Parameters.Add(myParameter);
-            }
-
-            myType.TypeMethods.Add(myMethod);
-            context.Methods.Add(myMethod);
-        }
-        context.Types.Add(myType);
+            IsActive = random.NextDouble() < 0.7,
+            Name = $"Thing {idx}",
+            Created = DateTime.Now.AddHours(-1 * 24 * 7 * 4 * random.NextDouble())
+        };
+        context.SomeThings.Add(something);
     }
 
     context.SaveChanges();
 }
 
-namespace ExpressionDb
+namespace SomeDb
 {
     /// <summary>
-    /// Represents a property on a type.
+    /// I always wanted to demo something.
     /// </summary>
-    public class MyProperty
+    public class Something
     {
         public int Id { get; set; }
         public string Name { get; set; }
-
-        public int PropertyTypeId { get; set; }
-        public virtual MyType PropertyType { get; set; }
-
-        public int ParentTypeId { get; set; }
-        public virtual MyType ParentType { get; set; }
+        public bool IsActive { get; set; }
+        public DateTime Created { get; set; }
     }
-
+    
     /// <summary>
-    /// Represents a parameter on a method.
+    /// I wanted to show a data context.
     /// </summary>
-    public class MyParameter
+    public class ADbContext : DbContext
     {
-        public int Id { get; set; }
-        public string Name { get; set; }
-
-        public int ParameterTypeId { get; set; }
-        public virtual MyType ParameterType { get; set; }
-
-        public int ParentMethodId { get; set; }
-        public virtual MyMethod ParentMethod { get; set; }
-    }
-
-    /// <summary>
-    /// Represents a method on a type.
-    /// </summary>
-    public class MyMethod
-    {
-        public int Id { get; set; }
-        public string Name { get; set; }
-
-        public int ReturnTypeId { get; set; }
-        public virtual MyType ReturnType { get; set; }
-
-        public int ParentTypeId { get; set; }
-        public virtual MyType ParentType { get; set; }
-
-        public virtual ICollection<MyParameter> MethodParameters { get; set; }
-            = new List<MyParameter>();
-    }
-
-    /// <summary>
-    /// Represents a type.
-    /// </summary>
-    public class MyType
-    {
-        public int Id { get; set; }
-        public string Name { get; set; }
-
-        /// <summary>
-        /// Has many methods.
-        /// </summary>
-        public virtual ICollection<MyMethod> TypeMethods { get; set; }
-            = new List<MyMethod>();
-
-        /// <summary>
-        /// Has many properties.
-        /// </summary>
-        public virtual ICollection<MyProperty> TypeProperties { get; set; }
-            = new List<MyProperty>();
-    }
-
-    /// <summary>
-    /// The data context.
-    /// </summary>
-    public class MyExpressionContext : DbContext
-    {
-        public MyExpressionContext() { }
-        public MyExpressionContext(
-            DbContextOptions<MyExpressionContext> options) 
+        public ADbContext() { }
+        public ADbContext(
+            DbContextOptions<ADbContext> options) 
             : base(options) { }
 
-        /// <summary>
-        /// Interact with options here.
-        /// </summary>
-        /// <param name="optionsBuilder">The <see cref="DbContextOptionsBuilder"/>.</param>
-        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-        {
-            //optionsBuilder.AddInterceptors(new LimitResultsCommandInterceptor());
-            
-            base.OnConfiguring(optionsBuilder);
-        }
-
-        /// <summary>
-        /// Define the model.
-        /// </summary>
-        /// <param name="modelBuilder">The <see cref="ModelBuilder"/>.</param>
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
-        {
-            modelBuilder.Entity<MyType>()
-                .HasMany(mt => mt.TypeMethods)
-                .WithOne(m => m.ParentType);
-
-            modelBuilder.Entity<MyType>()
-                .HasMany(mt => mt.TypeProperties)
-                .WithOne(p => p.ParentType);
-
-            modelBuilder.Entity<MyMethod>()
-                .HasMany(m => m.MethodParameters)
-                .WithOne(p => p.ParentMethod);
-
-            base.OnModelCreating(modelBuilder);
-        }
-
-        public DbSet<MyType> Types { get; set; }
-        public DbSet<MyMethod> Methods { get; set; }
-        public DbSet<MyProperty> Properties { get; set; }
-        public DbSet<MyParameter> Parameters { get; set; }
-    }
-
-    /// <summary>
-    /// Intercepts SELECT and adds LIMIT 5.
-    /// </summary>
-    public class LimitResultsCommandInterceptor : DbCommandInterceptor
-    {
-        public override InterceptionResult<DbDataReader> ReaderExecuting(
-            DbCommand command,
-            CommandEventData eventData,
-            InterceptionResult<DbDataReader> result)
-        {
-            ManipulateCommand(command);
-            return result;
-        }
-        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
-            DbCommand command,
-            CommandEventData eventData,
-            InterceptionResult<DbDataReader> result,
-            CancellationToken cancellationToken = default)
-        {
-            ManipulateCommand(command);
-            return new ValueTask<InterceptionResult<DbDataReader>>(result);
-        }
-        private static void ManipulateCommand(DbCommand command)
-        {
-            if (command.CommandText.Contains("SELECT", StringComparison.Ordinal))
-            {
-                command.CommandText += " LIMIT 5";
-            }
-        }
+        public DbSet<Something> SomeThings { get; set; }
     }
 
     /// <summary>
@@ -372,4 +149,3 @@ namespace ExpressionDb
             .Replace(new string(new[] { (char)0x01 }), Environment.NewLine);        
     }
 }
-
